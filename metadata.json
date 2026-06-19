@@ -1,0 +1,6 @@
+{
+  "name": "Dziennik Głosowy Offline",
+  "description": "W pełni offline aplikacja PWA do dyktowania i formatowania wpisów w dzienniku do plików Markdown (.md) z automatyczną synchronizacją z folderem lokalnym.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
