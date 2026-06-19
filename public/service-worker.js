@@ -1,10 +1,9 @@
 const CACHE_NAME = 'dziennik-glosowy-offline-v1';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg',
-  '/favicon.ico'
+  './',
+  'index.html',
+  'manifest.json',
+  "icon.svg"
 ];
 
 // Install Event
@@ -86,7 +85,7 @@ self.addEventListener('fetch', (event) => {
           }
           // If seeking the root webpage offline without custom match
           if (event.request.mode === 'navigate') {
-            return caches.match('/');
+            return caches.match('./');
           }
           return new Response('Jesteś offline, a ten zasób nie jest jeszcze zachowany w pamięci podręcznej.', {
             status: 503,
