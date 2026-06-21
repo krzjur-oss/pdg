@@ -60,6 +60,7 @@ export default function NoteEditor({
   
   const recognitionRef = useRef<any>(null);
   const saveDebounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const lastProcessedIndexRef = useRef<number>(-1);
   
   // Sync state variables with actual values
   useEffect(() => {
@@ -156,6 +157,7 @@ export default function NoteEditor({
 
   const startDictation = () => {
     setSpeechError(null);
+    lastProcessedIndexRef.current = -1;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
@@ -189,7 +191,7 @@ export default function NoteEditor({
         setInterimSpeech('');
       };
 
-      // Handle continuous voice streaming
+      // Handle continuous voice streaming with index duplication guard
       rec.onresult = (event: any) => {
         let finalTrans = '';
         let interimTrans = '';
@@ -197,7 +199,10 @@ export default function NoteEditor({
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const result = event.results[i];
           if (result.isFinal) {
-            finalTrans += result[0].transcript;
+            if (i > lastProcessedIndexRef.current) {
+              finalTrans += result[0].transcript;
+              lastProcessedIndexRef.current = i;
+            }
           } else {
             interimTrans += result[0].transcript;
           }
