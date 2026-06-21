@@ -360,7 +360,9 @@ export function applyPolishVoiceFormatting(text: string): string {
     .replace(/\s*podnagłówek\s*/gi, '\n## ')
     .replace(/\s*od punktu\s*/gi, '\n- ')
     .replace(/\s*rozpocznij listę\s*/gi, '\n- ')
-    .replace(/\s*cudzysłów\s*(.*?)\s*cudzysłów/gi, ' "$1" ');
+    .replace(/\s*cudzysłów\s*(.*?)\s*cudzysłów/gi, ' "$1" ')
+    .replace(/\s*pogrub\s*(.*?)\s*pogrub/gi, ' **$1** ')
+    .replace(/\s*kursywa\s*(.*?)\s*kursywa/gi, ' *$1* ');
 
   // Clean double spaces and fix double puncts
   formatted = formatted
@@ -376,60 +378,91 @@ export function applyPolishVoiceFormatting(text: string): string {
 /**
  * Intelligent text-overlap merger.
  * Identifies suffix-prefix word overlap between two strings and merges them
- * to prevent duplicates, particularly on unstable mobile/Android speech recognition.
+ * to prevent duplicates, particularly on unstable mobile/Android speech recognition,
+ * while strictly preserving whitespace-based formatting commands and punctuation.
  */
 export function mergeOverlappingText(s1: string, s2: string): string {
-  const cleanS1 = (s1 || '').trim();
-  const cleanS2 = (s2 || '').trim();
+  if (!s1) return s2;
+  if (!s2) return s1;
 
-  if (!cleanS1) return cleanS2;
-  if (!cleanS2) return cleanS1;
+  // Normalize spaces/punctuation for comparison only
+  const cleanString = (str: string) => {
+    return str
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  };
 
-  const words1 = cleanS1.split(/\s+/);
-  const words2 = cleanS2.split(/\s+/);
+  const norm1 = cleanString(s1);
+  const norm2 = cleanString(s2);
 
+  // If after cleaning, s2 is empty (e.g. it was just punctuation, spaces, or newlines)
+  if (!norm2) {
+    const s2Trimmed = s2.trim();
+    if (s2Trimmed && s1.endsWith(s2Trimmed)) {
+      return s1;
+    }
+    if (s1.endsWith(s2)) {
+      return s1;
+    }
+    return s1 + s2;
+  }
+
+  // If s2 (cleaned) is fully contained in s1, it's a duplicate chunk
+  if (norm1.includes(norm2)) {
+    const words1 = norm1.split(" ");
+    const words2 = norm2.split(" ");
+    const lastWords1 = words1.slice(-words2.length * 2).join(" ");
+    if (lastWords1.includes(norm2)) {
+      return s1;
+    }
+  }
+
+  // Word-level suffix-prefix overlap search using normalized words
+  const words1 = norm1.split(" ");
+  const words2 = norm2.split(" ");
+  
   const maxOverlap = Math.min(words1.length, words2.length);
-  let overlapCount = 0;
+  let overlapWordCount = 0;
 
-  // Find the largest k such that the last k words of s1 match the first k words of s2
   for (let k = maxOverlap; k > 0; k--) {
     let match = true;
     for (let i = 0; i < k; i++) {
-      const w1 = words1[words1.length - k + i].toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      const w2 = words2[i].toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-      if (w1 !== w2) {
+      if (words1[words1.length - k + i] !== words2[i]) {
         match = false;
         break;
       }
     }
     if (match) {
-      overlapCount = k;
+      overlapWordCount = k;
       break;
     }
   }
 
-  if (overlapCount > 0) {
-    const remaining = words2.slice(overlapCount);
-    const joinedRemaining = remaining.join(" ");
-    return cleanS1 + (joinedRemaining ? " " + joinedRemaining : "");
-  }
-
-  // If no word-level overlap, check if s2 is completely a substring of s1 (stale duplicate chunk)
-  if (cleanS1.toLowerCase().includes(cleanS2.toLowerCase())) {
-    return cleanS1;
-  }
-
-  // Check if s1 contains the beginning part of s2 to handle minor edits
-  const s2Short = cleanS2.substring(0, Math.min(15, cleanS2.length)).toLowerCase();
-  if (cleanS1.toLowerCase().includes(s2Short)) {
-    // If it spans near the end, avoid duplicate appending
-    const trailingPart = cleanS1.substring(Math.max(0, cleanS1.length - cleanS2.length * 1.5)).toLowerCase();
-    if (trailingPart.includes(s2Short)) {
-      return cleanS1;
+  if (overlapWordCount > 0) {
+    // We found an overlap of 'overlapWordCount' words.
+    // We want to merge s1 and s2 while preserving formatting of s2.
+    const originalWords2 = s2.trim().split(/\s+/);
+    if (overlapWordCount < originalWords2.length) {
+      const nonOverlappingPart = originalWords2.slice(overlapWordCount).join(" ");
+      const gap = s1.endsWith(" ") || nonOverlappingPart.startsWith(" ") ? "" : " ";
+      return s1 + gap + nonOverlappingPart;
+    } else {
+      // The entire s2 is an overlap, so it's a duplicate transcript
+      return s1;
     }
   }
 
-  // Otherwise, just append with correct spacing
-  const gap = cleanS1.match(/[.!?]$/) ? " " : " ";
-  return cleanS1 + gap + cleanS2;
+  // If there's no word overlap, check if s2 starts with punctuation or newlines
+  const isPunctuationOrNewline = /^[.,!?:;\n\r]/.test(s2) || /^[.,!?:;\n\r]/.test(s2.trim());
+  
+  if (isPunctuationOrNewline) {
+    return s1 + s2;
+  }
+
+  // Check if s1 ends with whitespace or s2 starts with whitespace to determine slot spacing
+  const endsWithWhitespace = /\s$/.test(s1) || /^\s/.test(s2);
+  const gap = endsWithWhitespace ? "" : " ";
+  return s1 + gap + s2;
 }

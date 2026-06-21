@@ -92,6 +92,13 @@ export default function NoteEditor({
   useEffect(() => {
     return () => {
       if (saveDebounceTimeout.current) clearTimeout(saveDebounceTimeout.current);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (err) {
+          console.error('Clean up speech recognition error:', err);
+        }
+      }
     };
   }, []);
 
