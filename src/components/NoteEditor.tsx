@@ -61,6 +61,7 @@ export default function NoteEditor({
   const recognitionRef = useRef<any>(null);
   const saveDebounceTimeout = useRef<NodeJS.Timeout | null>(null);
   const lastProcessedIndexRef = useRef<number>(-1);
+  const contentBeforeDictationRef = useRef<string>('');
   
   // Sync state variables with actual values
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function NoteEditor({
       setTags(entry.tags);
       setMood(entry.mood);
       setWeather(entry.weather);
+      contentBeforeDictationRef.current = entry.content;
     }
   }, [entry?.id]);
 
@@ -135,6 +137,7 @@ export default function NoteEditor({
       triggerSave({ title: val });
     } else if (field === 'content') {
       setContent(val);
+      contentBeforeDictationRef.current = val;
       // Debounce saving main content text to prevent continuous write triggers
       if (saveDebounceTimeout.current) clearTimeout(saveDebounceTimeout.current);
       saveDebounceTimeout.current = setTimeout(() => {
@@ -158,6 +161,7 @@ export default function NoteEditor({
   const startDictation = () => {
     setSpeechError(null);
     lastProcessedIndexRef.current = -1;
+    contentBeforeDictationRef.current = content || '';
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
@@ -191,43 +195,35 @@ export default function NoteEditor({
         setInterimSpeech('');
       };
 
-      // Handle continuous voice streaming with index duplication guard
+      // Handle continuous voice streaming with absolute accumulation to guarantee no double speech
       rec.onresult = (event: any) => {
-        let finalTrans = '';
+        let sessionFinalTranscript = '';
         let interimTrans = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        for (let i = 0; i < event.results.length; ++i) {
           const result = event.results[i];
           if (result.isFinal) {
-            if (i > lastProcessedIndexRef.current) {
-              finalTrans += result[0].transcript;
-              lastProcessedIndexRef.current = i;
-            }
+            sessionFinalTranscript += result[0].transcript;
           } else {
             interimTrans += result[0].transcript;
           }
         }
 
-        if (interimTrans) {
-          setInterimSpeech(interimTrans);
-        }
+        setInterimSpeech(interimTrans);
 
-        if (finalTrans) {
+        if (sessionFinalTranscript) {
           // Format based on voice rules (e.g., "kropka" -> ".")
-          let cleanedAddition = finalTrans;
+          let cleanedAddition = sessionFinalTranscript;
           if (dictationLang === 'pl-PL') {
-            cleanedAddition = applyPolishVoiceFormatting(finalTrans);
+            cleanedAddition = applyPolishVoiceFormatting(sessionFinalTranscript);
           }
           
-          setContent((prev) => {
-            const separator = prev && !prev.endsWith('\n') && !prev.endsWith(' ') ? ' ' : '';
-            const newContent = prev + separator + cleanedAddition;
-            
-            // Trigger auto-save immediately
-            triggerSave({ content: newContent });
-            return newContent;
-          });
-          setInterimSpeech('');
+          const baseline = contentBeforeDictationRef.current || '';
+          const separator = baseline && !baseline.endsWith('\n') && !baseline.endsWith(' ') ? ' ' : '';
+          const newContent = baseline + separator + cleanedAddition;
+          
+          setContent(newContent);
+          triggerSave({ content: newContent });
         }
       };
 
