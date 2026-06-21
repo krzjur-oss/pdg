@@ -21,7 +21,7 @@ import {
   Maximize2
 } from 'lucide-react';
 import { JournalEntry, DictationLanguage } from '../types';
-import { renderMarkdown, applyPolishVoiceFormatting, POLISH_VOICE_COMMANDS } from '../utils';
+import { renderMarkdown, applyPolishVoiceFormatting, POLISH_VOICE_COMMANDS, mergeOverlappingText } from '../utils';
 
 interface NoteEditorProps {
   entry: JournalEntry | null;
@@ -159,6 +159,16 @@ export default function NoteEditor({
   };
 
   const startDictation = () => {
+    // Single instance guard: secure and stop any previous active dictation instance to avoid parallel double listeners
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.error('Error stopping existing recognition instance:', err);
+      }
+      recognitionRef.current = null;
+    }
+
     setSpeechError(null);
     lastProcessedIndexRef.current = -1;
     contentBeforeDictationRef.current = content || '';
@@ -195,32 +205,30 @@ export default function NoteEditor({
         setInterimSpeech('');
       };
 
-      // Handle continuous voice streaming with absolute accumulation to guarantee no double speech
+      // Handle continuous voice streaming with smart overlap merge algorithm to resolve Gboard/mobile duplicating bugs
       rec.onresult = (event: any) => {
-        let sessionFinalTranscript = '';
+        let mergedFinalTranscript = '';
         let interimTrans = '';
 
         for (let i = 0; i < event.results.length; ++i) {
           const result = event.results[i];
+          const transcript = result[0].transcript;
           if (result.isFinal) {
-            sessionFinalTranscript += result[0].transcript;
+            let formattedSegment = transcript;
+            if (dictationLang === 'pl-PL') {
+              formattedSegment = applyPolishVoiceFormatting(transcript);
+            }
+            mergedFinalTranscript = mergeOverlappingText(mergedFinalTranscript, formattedSegment);
           } else {
-            interimTrans += result[0].transcript;
+            interimTrans += transcript;
           }
         }
 
         setInterimSpeech(interimTrans);
 
-        if (sessionFinalTranscript) {
-          // Format based on voice rules (e.g., "kropka" -> ".")
-          let cleanedAddition = sessionFinalTranscript;
-          if (dictationLang === 'pl-PL') {
-            cleanedAddition = applyPolishVoiceFormatting(sessionFinalTranscript);
-          }
-          
+        if (mergedFinalTranscript) {
           const baseline = contentBeforeDictationRef.current || '';
-          const separator = baseline && !baseline.endsWith('\n') && !baseline.endsWith(' ') ? ' ' : '';
-          const newContent = baseline + separator + cleanedAddition;
+          const newContent = mergeOverlappingText(baseline, mergedFinalTranscript);
           
           setContent(newContent);
           triggerSave({ content: newContent });

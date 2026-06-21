@@ -372,3 +372,64 @@ export function applyPolishVoiceFormatting(text: string): string {
 
   return formatted;
 }
+
+/**
+ * Intelligent text-overlap merger.
+ * Identifies suffix-prefix word overlap between two strings and merges them
+ * to prevent duplicates, particularly on unstable mobile/Android speech recognition.
+ */
+export function mergeOverlappingText(s1: string, s2: string): string {
+  const cleanS1 = (s1 || '').trim();
+  const cleanS2 = (s2 || '').trim();
+
+  if (!cleanS1) return cleanS2;
+  if (!cleanS2) return cleanS1;
+
+  const words1 = cleanS1.split(/\s+/);
+  const words2 = cleanS2.split(/\s+/);
+
+  const maxOverlap = Math.min(words1.length, words2.length);
+  let overlapCount = 0;
+
+  // Find the largest k such that the last k words of s1 match the first k words of s2
+  for (let k = maxOverlap; k > 0; k--) {
+    let match = true;
+    for (let i = 0; i < k; i++) {
+      const w1 = words1[words1.length - k + i].toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      const w2 = words2[i].toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      if (w1 !== w2) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      overlapCount = k;
+      break;
+    }
+  }
+
+  if (overlapCount > 0) {
+    const remaining = words2.slice(overlapCount);
+    const joinedRemaining = remaining.join(" ");
+    return cleanS1 + (joinedRemaining ? " " + joinedRemaining : "");
+  }
+
+  // If no word-level overlap, check if s2 is completely a substring of s1 (stale duplicate chunk)
+  if (cleanS1.toLowerCase().includes(cleanS2.toLowerCase())) {
+    return cleanS1;
+  }
+
+  // Check if s1 contains the beginning part of s2 to handle minor edits
+  const s2Short = cleanS2.substring(0, Math.min(15, cleanS2.length)).toLowerCase();
+  if (cleanS1.toLowerCase().includes(s2Short)) {
+    // If it spans near the end, avoid duplicate appending
+    const trailingPart = cleanS1.substring(Math.max(0, cleanS1.length - cleanS2.length * 1.5)).toLowerCase();
+    if (trailingPart.includes(s2Short)) {
+      return cleanS1;
+    }
+  }
+
+  // Otherwise, just append with correct spacing
+  const gap = cleanS1.match(/[.!?]$/) ? " " : " ";
+  return cleanS1 + gap + cleanS2;
+}
