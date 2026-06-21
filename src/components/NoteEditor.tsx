@@ -62,6 +62,13 @@ export default function NoteEditor({
   const saveDebounceTimeout = useRef<NodeJS.Timeout | null>(null);
   const lastProcessedIndexRef = useRef<number>(-1);
   const contentBeforeDictationRef = useRef<string>('');
+  const isIntentionalStopRef = useRef<boolean>(false);
+  const contentRef = useRef<string>('');
+
+  // Keep contentRef in sync with content state for callbacks/listeners
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   
   // Sync state variables with actual values
   useEffect(() => {
@@ -179,6 +186,8 @@ export default function NoteEditor({
     setSpeechError(null);
     lastProcessedIndexRef.current = -1;
     contentBeforeDictationRef.current = content || '';
+    isIntentionalStopRef.current = false;
+    
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
@@ -199,17 +208,49 @@ export default function NoteEditor({
 
       rec.onerror = (e: any) => {
         console.error('Speech recognition error:', e.error);
-        if (e.error === 'not-allowed') {
-          setSpeechError('Brak dostępu do mikrofonu. Nadaj uprawnienia mikrofonu w przeglądarce.');
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') {
+          if (e.error === 'not-allowed') {
+            setSpeechError('Brak dostępu do mikrofonu. Nadaj uprawnienia mikrofonu w przeglądarce.');
+          } else if (e.error === 'audio-capture') {
+            setSpeechError('Nie wykryto mikrofonu. Podłącz urządzenie nagrywające.');
+          } else {
+            setSpeechError(`Błąd krytyczny mikrofonu: ${e.error}`);
+          }
+          stopDictation();
         } else {
-          setSpeechError(`Błąd rozpoznawania mowy: ${e.error}`);
+          console.warn('Non-fatal speech recognition error, allowing auto-restart:', e.error);
         }
-        stopDictation();
       };
 
       rec.onend = () => {
-        setIsDictating(false);
-        setInterimSpeech('');
+        // If the user did not click "Stop" explicitly, they expect the dictation to remain active.
+        // Restart the recognition using our smart auto-resume to survive browser silence timeouts.
+        if (!isIntentionalStopRef.current) {
+          console.log('Automated stop detected. Reactivating speech recognition after silent pause...');
+          // Sync baseline to the latest content buffer so we don't start counting from the original start point
+          contentBeforeDictationRef.current = contentRef.current;
+          
+          try {
+            if (recognitionRef.current) {
+              recognitionRef.current.start();
+            }
+          } catch (err) {
+            console.error('Immediate auto-restart failed:', err);
+            // Fallback retry after brief timeout
+            setTimeout(() => {
+              if (!isIntentionalStopRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start();
+                } catch (retryErr) {
+                  console.error('Delayed auto-restart failed:', retryErr);
+                }
+              }
+            }, 300);
+          }
+        } else {
+          setIsDictating(false);
+          setInterimSpeech('');
+        }
       };
 
       // Handle continuous voice streaming with smart overlap merge algorithm to resolve Gboard/mobile duplicating bugs
@@ -252,6 +293,7 @@ export default function NoteEditor({
   };
 
   const stopDictation = () => {
+    isIntentionalStopRef.current = true;
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
